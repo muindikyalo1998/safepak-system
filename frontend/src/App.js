@@ -96,7 +96,7 @@ function App() {
 
     setAttendance(Array.isArray(data) ? data : []);
 
-  }, [authHeader]);
+  }, [authHeader, API]);
 
   const loadSalarySummary = useCallback(async () => {
 
@@ -110,7 +110,7 @@ function App() {
 
     setSalarySummary(Array.isArray(data) ? data : []);
 
-  }, [authHeader, role]);
+  }, [authHeader, role, API]);
 
   const loadAll = useCallback(() => {
 
