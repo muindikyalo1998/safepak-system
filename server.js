@@ -10,6 +10,13 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+app.get("/", (req, res) => {
+  res.send("ROOT ROUTE WORKING");
+});
+
+app.get("/test", (req, res) => {
+  res.send("TEST ROUTE WORKING");
+});
 app.use((req, res, next) => {
   console.log("➡️ REQUEST:", req.method, req.url);
   next();
