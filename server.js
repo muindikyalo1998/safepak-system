@@ -27,8 +27,10 @@ app.get("/", (req, res) => {
     status: "OK",
     message: "SafePak API is running 🚀"
   });
+}); 
+app.get("/nicholas", (req, res) => {
+  res.send("NICHOLAS TEST");
 });
-
 // TEST ROUTE
 app.get("/test", (req, res) => {
   res.send("TEST OK");
