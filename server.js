@@ -35,15 +35,25 @@ app.get("/test", (req, res) => {
   res.send("TEST OK");
 });
 
-/* ================= DB (SAFE VERSION) ================= */
+/* ================= DB (STEP 1 + STEP 2 FIX) ================= */
 
-const db = mysql.createPool({
-  host: process.env.DB_HOST || "localhost",
-  user: process.env.DB_USER || "root",
-  password: process.env.DB_PASSWORD || "",
-  database: process.env.DB_NAME || "test",
-  port: process.env.DB_PORT || 3306
-});
+let db;
+
+async function initDB() {
+  try {
+    db = mysql.createPool({
+      host: process.env.DB_HOST,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME,
+      port: process.env.DB_PORT || 3306
+    });
+
+    console.log("✅ DB initialized successfully");
+  } catch (err) {
+    console.log("❌ DB init failed:", err.message);
+  }
+}
 
 /* ================= SECRET ================= */
 
@@ -237,10 +247,13 @@ app.get("/api/attendance", verifyToken, async (req, res) => {
   }
 });
 
-/* ================= SERVER START ================= */
+/* ================= SERVER START (STEP 3 FIX) ================= */
 
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, "0.0.0.0", () => {
+app.listen(PORT, "0.0.0.0", async () => {
   console.log(`🚀 SafePak running on port ${PORT}`);
+
+  // initialize DB AFTER server starts (prevents Railway timeout)
+  await initDB();
 });
