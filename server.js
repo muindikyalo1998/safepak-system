@@ -13,7 +13,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// request logger (put FIRST so you see everything)
 app.use((req, res, next) => {
   console.log("➡️", req.method, req.url);
   next();
@@ -21,17 +20,17 @@ app.use((req, res, next) => {
 
 /* ================= HEALTH ROUTES ================= */
 
-// ROOT ROUTE (Railway checks this sometimes)
 app.get("/", (req, res) => {
   res.json({
     status: "OK",
     message: "SafePak API is running 🚀"
   });
-}); 
+});
+
 app.get("/nicholas", (req, res) => {
   res.send("NICHOLAS TEST");
 });
-// TEST ROUTE
+
 app.get("/test", (req, res) => {
   res.send("TEST OK");
 });
