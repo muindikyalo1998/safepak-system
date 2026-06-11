@@ -59,13 +59,48 @@ function verifyToken(req, res, next) {
   }
 }
 
-/* ================= LOGIN (FIXED) ================= */
+/* ================= SHIFT ================= */
+
+function getShift() {
+  const h = new Date().getHours();
+
+  if (h >= 6 && h < 14) return "Morning";
+  if (h >= 14 && h < 22) return "Afternoon";
+  return "Night";
+}
+
+/* ================= ALLOCATION FUNCTION ================= */
+
+function assignResources(role) {
+  let machineNumber = null;
+  let godownNumber = null;
+
+  if (role === "Admin") {
+    return { machineNumber: null, godownNumber: null };
+  }
+
+  // Employees → ONLY machine
+  if (role === "Employee") {
+    machineNumber = Math.floor(Math.random() * 130) + 1;
+    return { machineNumber, godownNumber: null };
+  }
+
+  // Cleaners + Supervisors → ONLY godown
+  if (role === "Cleaner" || role === "Supervisor") {
+    godownNumber = Math.floor(Math.random() * 13) + 1;
+    return { machineNumber: null, godownNumber };
+  }
+
+  return { machineNumber: null, godownNumber: null };
+}
+
+/* ================= LOGIN ================= */
 
 app.post("/api/login", async (req, res) => {
   try {
     const { employeeNumber, password } = req.body;
 
-    // 🔥 TEST ADMIN LOGIN
+    /* ---------- ADMIN LOGIN ---------- */
     if (employeeNumber === "001" && password === "2000") {
       const token = jwt.sign(
         { employeeNumber: "001", role: "Admin" },
@@ -83,7 +118,7 @@ app.post("/api/login", async (req, res) => {
       });
     }
 
-    // 🔥 DATABASE LOGIN
+    /* ---------- EMPLOYEE LOGIN ---------- */
     const [rows] = await db.query(
       "SELECT * FROM employees WHERE employeeNumber=?",
       [employeeNumber]
@@ -104,6 +139,23 @@ app.post("/api/login", async (req, res) => {
       { expiresIn: "1d" }
     );
 
+    /* ---------- ASSIGN MACHINE / GODOWN ---------- */
+    const { machineNumber, godownNumber } = assignResources(user.role);
+
+    /* ---------- INSERT ATTENDANCE ---------- */
+    await db.query(`
+      INSERT INTO attendance
+      (employeeNumber, fullName, role, loginTime, shift, attendanceDate, machineNumber, godownNumber, workedMinutes)
+      VALUES (?, ?, ?, NOW(), ?, CURDATE(), ?, ?, 0)
+    `, [
+      user.employeeNumber,
+      user.fullName,
+      user.role,
+      getShift(),
+      machineNumber,
+      godownNumber
+    ]);
+
     res.json({ token, user });
 
   } catch (err) {
@@ -112,49 +164,30 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
-/* ================= ATTENDANCE (TEST DATA) ================= */
+/* ================= ATTENDANCE (REAL DB VERSION) ================= */
 
 app.get("/api/attendance", verifyToken, async (req, res) => {
   try {
-    res.json([
-      {
-        employeeNumber: "001",
-        fullName: "Admin User",
-        role: "Admin",
-        shift: "Morning",
-        loginTime: "08:00",
-        logoutTime: "16:00",
-        workedMinutes: 480,
-        workedHours: 8
-      },
-      {
-        employeeNumber: "EMP002",
-        fullName: "Mary Wanjiku",
-        role: "Supervisor",
-        shift: "Afternoon",
-        loginTime: "14:00",
-        logoutTime: null,
-        workedMinutes: 300,
-        workedHours: 5
-      },
-      {
-        employeeNumber: "EMP003",
-        fullName: "Peter Otieno",
-        role: "Security",
-        shift: "Night",
-        loginTime: "22:00",
-        logoutTime: "06:00",
-        workedMinutes: 480,
-        workedHours: 8
-      }
-    ]);
+    const [rows] = await db.query(`
+      SELECT *
+      FROM attendance
+      ORDER BY id DESC
+    `);
+
+    const result = rows.map(r => ({
+      ...r,
+      workedHours: r.workedMinutes ? Math.round(r.workedMinutes / 60) : 0
+    }));
+
+    res.json(result);
+
   } catch (err) {
     console.log(err);
     res.status(500).json({ error: "Attendance error" });
   }
 });
 
-/* ================= EMPLOYEES (UNCHANGED) ================= */
+/* ================= EMPLOYEES ================= */
 
 app.post("/api/employees", verifyToken, async (req, res) => {
   if (req.user.role !== "Admin") {
