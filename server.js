@@ -1,6 +1,7 @@
 require("dotenv").config();
 
 const express = require("express");
+const mysql = require("mysql2/promise");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const PDFDocument = require("pdfkit");
@@ -22,7 +23,7 @@ app.use((req, res, next) => {
 app.get("/", (req, res) => {
   res.json({
     status: "OK",
-    message: "SafePak API is running 🚀 (DEBUG MODE - NO DB)"
+    message: "SafePak API is running 🚀"
   });
 });
 
@@ -34,13 +35,15 @@ app.get("/test", (req, res) => {
   res.send("TEST OK");
 });
 
-/* ================= TEMP DB (IMPORTANT DEBUG FIX) ================= */
+/* ================= DB ================= */
 
-const db = {
-  query: async () => {
-    return [[], []];
-  }
-};
+const db = mysql.createPool({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  port: process.env.DB_PORT
+});
 
 /* ================= SECRET ================= */
 
@@ -86,17 +89,16 @@ app.post("/api/login", async (req, res) => {
     );
 
     if (!rows.length) {
-      return res.status(404).json({ error: "Employee not found (mock DB)" });
+      return res.status(404).json({ error: "Employee not found" });
     }
 
-    const user = rows[0] || {
-      employeeNumber,
-      fullName: "Test User",
-      role: "Admin"
-    };
+    const user = rows[0];
 
     const token = jwt.sign(
-      { employeeNumber: user.employeeNumber, role: user.role },
+      {
+        employeeNumber: user.employeeNumber,
+        role: user.role
+      },
       SECRET,
       { expiresIn: "1d" }
     );
@@ -112,7 +114,7 @@ app.post("/api/login", async (req, res) => {
 /* ================= LOGOUT ================= */
 
 app.post("/api/logout", verifyToken, async (req, res) => {
-  res.json({ message: "Logged out (mock DB)" });
+  res.json({ message: "Logged out" });
 });
 
 /* ================= EMPLOYEES ================= */
@@ -122,7 +124,7 @@ app.post("/api/employees", verifyToken, async (req, res) => {
     return res.status(403).json({ error: "Admin only" });
   }
 
-  res.json({ message: "Employee saved (mock DB)" });
+  res.json({ message: "Employee saved" });
 });
 
 app.put("/api/employees/:id", verifyToken, async (req, res) => {
@@ -130,7 +132,7 @@ app.put("/api/employees/:id", verifyToken, async (req, res) => {
     return res.status(403).json({ error: "Admin only" });
   }
 
-  res.json({ message: "Employee updated (mock DB)" });
+  res.json({ message: "Employee updated" });
 });
 
 app.delete("/api/employees/:id", verifyToken, async (req, res) => {
@@ -138,7 +140,7 @@ app.delete("/api/employees/:id", verifyToken, async (req, res) => {
     return res.status(403).json({ error: "Admin only" });
   }
 
-  res.json({ message: "Employee deleted (mock DB)" });
+  res.json({ message: "Employee deleted" });
 });
 
 /* ================= ATTENDANCE ================= */
@@ -152,5 +154,5 @@ app.get("/api/attendance", verifyToken, async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 SafePak running on port ${PORT} (DEBUG MODE)`);
+  console.log(`🚀 SafePak running on port ${PORT}`);
 });
