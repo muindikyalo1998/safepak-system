@@ -6,13 +6,34 @@ const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const PDFDocument = require("pdfkit");
 
+const bcrypt = require("bcrypt");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
+
 const app = express();
+
+/* ================= SECURITY MIDDLEWARE ================= */
+app.use(helmet());
 
 app.use(cors());
 app.use(express.json());
 
-/* ================= DB ================= */
+/* ================= RATE LIMITING (LOGIN ABUSE PROTECTION) ================= */
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 min
+  max: 20, // max 20 attempts per IP
+  message: { error: "Too many login attempts. Try again later." }
+});
 
+app.use("/api/login", loginLimiter);
+
+/* ================= LOGGING ================= */
+app.use((req, res, next) => {
+  console.log("➡️", req.method, req.url);
+  next();
+});
+
+/* ================= DB ================= */
 const db = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
@@ -22,508 +43,212 @@ const db = mysql.createPool({
 });
 
 /* ================= SECRET ================= */
-
 const SECRET = process.env.SECRET || "safepak_secret";
 
+/* ================= AUTH ================= */
+function verifyToken(req, res, next) {
+  const auth = req.headers.authorization;
+
+  if (!auth) return res.status(401).json({ error: "No token" });
+
+  try {
+    const token = auth.split(" ")[1];
+    req.user = jwt.verify(token, SECRET);
+    next();
+  } catch {
+    return res.status(401).json({ error: "Invalid token" });
+  }
+}
+
 /* ================= SHIFT ================= */
-
 function getShift() {
-
   const h = new Date().getHours();
 
   if (h >= 6 && h < 14) return "Morning";
-
   if (h >= 14 && h < 22) return "Afternoon";
-
   return "Night";
 }
 
-/* ================= TOKEN ================= */
-
-function verifyToken(req, res, next) {
-
-  const auth = req.headers.authorization;
-
-  if (!auth) {
-    return res.status(401).json({
-      error: "No token"
-    });
-  }
-
-  try {
-
-    const token = auth.split(" ")[1];
-
-    req.user = jwt.verify(token, SECRET);
-
-    next();
-
-  } catch {
-
-    return res.status(401).json({
-      error: "Invalid token"
-    });
-  }
+/* ================= CHECK ACTIVE LOGIN ================= */
+async function isAlreadyLoggedIn(employeeNumber) {
+  const [rows] = await db.query(
+    "SELECT * FROM attendance WHERE employeeNumber=? AND logoutTime IS NULL",
+    [employeeNumber]
+  );
+  return rows.length > 0;
 }
 
-/* ================= LOGIN ================= */
+/* ================= MACHINE ALLOCATION ================= */
+async function assignMachine() {
+  const [rows] = await db.query(
+    "SELECT machineNumber FROM attendance WHERE logoutTime IS NULL AND machineNumber IS NOT NULL"
+  );
 
+  const used = rows.map(r => r.machineNumber);
+
+  for (let i = 1; i <= 130; i++) {
+    if (!used.includes(i)) return i;
+  }
+  return null;
+}
+
+/* ================= GODOWN ALLOCATION ================= */
+async function assignGodown() {
+  const [rows] = await db.query(
+    "SELECT godownNumber FROM attendance WHERE logoutTime IS NULL AND godownNumber IS NOT NULL"
+  );
+
+  const used = rows.map(r => r.godownNumber);
+
+  for (let i = 1; i <= 13; i++) {
+    if (!used.includes(i)) return i;
+  }
+  return null;
+}
+
+/* ================= LOGIN (SECURE VERSION) ================= */
 app.post("/api/login", async (req, res) => {
-
   try {
-
     const { employeeNumber, password } = req.body;
 
+    /* ---------- ADMIN LOGIN ---------- */
+    if (employeeNumber === "001" && password === "2000") {
+      const token = jwt.sign(
+        { employeeNumber: "001", role: "Admin" },
+        SECRET,
+        { expiresIn: "1d" }
+      );
+
+      return res.json({
+        token,
+        user: { employeeNumber: "001", role: "Admin", fullName: "Admin" }
+      });
+    }
+
+    /* ---------- EMPLOYEE LOGIN ---------- */
     const [rows] = await db.query(
       "SELECT * FROM employees WHERE employeeNumber=?",
       [employeeNumber]
     );
 
     if (!rows.length) {
-
-      return res.status(404).json({
-        error: "Employee not found"
-      });
+      return res.status(404).json({ error: "Employee not found" });
     }
 
     const user = rows[0];
 
-    /* ADMIN PASSWORD ONLY */
+    /* ---------- PASSWORD CHECK (bcrypt) ---------- */
+    const valid = await bcrypt.compare(password, user.password);
 
-    if (
-      user.employeeNumber === "001" &&
-      user.password !== password
-    ) {
-
-      return res.status(401).json({
-        error: "Wrong password"
-      });
+    if (!valid) {
+      return res.status(401).json({ error: "Invalid password" });
     }
 
-    /* CLOSE ACTIVE SESSION */
+    /* ---------- BLOCK DOUBLE LOGIN ---------- */
+    if (await isAlreadyLoggedIn(employeeNumber)) {
+      return res.status(400).json({ error: "Already logged in. Logout first." });
+    }
 
-    await db.query(
-      `UPDATE attendance
-       SET logoutTime = NOW(),
-       workedMinutes = TIMESTAMPDIFF(MINUTE, loginTime, NOW())
-       WHERE employeeNumber = ?
-       AND logoutTime IS NULL`,
-      [user.employeeNumber]
-    );
+    /* ---------- RESOURCE ALLOCATION ---------- */
+    let machineNumber = null;
+    let godownNumber = null;
 
-    /* INSERT ATTENDANCE */
+    if (user.role === "Employee") {
+      machineNumber = await assignMachine();
+    }
 
+    if (user.role === "Cleaner" || user.role === "Supervisor") {
+      godownNumber = await assignGodown();
+    }
+
+    /* ---------- INSERT ATTENDANCE ---------- */
     await db.query(
       `INSERT INTO attendance
-      (
-        employeeNumber,
-        fullName,
-        role,
-        loginTime,
-        workedMinutes,
-        shift
-      )
-      VALUES (?, ?, ?, NOW(), 0, ?)`,
+      (employeeNumber, fullName, role, loginTime, shift, attendanceDate, machineNumber, godownNumber, workedMinutes)
+      VALUES (?, ?, ?, NOW(), ?, CURDATE(), ?, ?, 0)`,
       [
         user.employeeNumber,
         user.fullName,
         user.role,
-        getShift()
+        getShift(),
+        machineNumber,
+        godownNumber
       ]
     );
 
-    /* TOKEN */
-
     const token = jwt.sign(
-      {
-        employeeNumber: user.employeeNumber,
-        role: user.role
-      },
+      { employeeNumber: user.employeeNumber, role: user.role },
       SECRET,
-      {
-        expiresIn: "1d"
-      }
+      { expiresIn: "1d" }
     );
 
-    res.json({
-      token,
-      user
-    });
+    res.json({ token, user });
 
   } catch (err) {
-
     console.log(err);
-
-    res.status(500).json({
-      error: "Login failed"
-    });
+    res.status(500).json({ error: "Login failed" });
   }
 });
 
 /* ================= LOGOUT ================= */
-
 app.post("/api/logout", verifyToken, async (req, res) => {
-
   try {
-
     await db.query(
       `UPDATE attendance
        SET logoutTime = NOW(),
-       workedMinutes = TIMESTAMPDIFF(MINUTE, loginTime, NOW())
-       WHERE employeeNumber = ?
-       AND logoutTime IS NULL`,
+           workedMinutes = TIMESTAMPDIFF(MINUTE, loginTime, NOW())
+       WHERE employeeNumber=? AND logoutTime IS NULL`,
       [req.user.employeeNumber]
     );
 
-    res.json({
-      message: "Logged out"
-    });
+    res.json({ message: "Logged out successfully" });
 
   } catch (err) {
-
     console.log(err);
-
-    res.status(500).json({
-      error: "Logout failed"
-    });
-  }
-});
-
-/* ================= ADD EMPLOYEE ================= */
-
-app.post("/api/employees", verifyToken, async (req, res) => {
-
-  try {
-
-    if (req.user.role !== "Admin") {
-
-      return res.status(403).json({
-        error: "Admin only"
-      });
-    }
-
-    const {
-      employeeNumber,
-      fullName,
-      role
-    } = req.body;
-
-    await db.query(
-      `INSERT INTO employees
-      (employeeNumber, fullName, role)
-      VALUES (?, ?, ?)`,
-      [
-        employeeNumber,
-        fullName,
-        role
-      ]
-    );
-
-    res.json({
-      message: "Employee saved"
-    });
-
-  } catch (err) {
-
-    console.log(err);
-
-    res.status(500).json({
-      error: "Add employee failed"
-    });
-  }
-});
-
-/* ================= UPDATE EMPLOYEE ================= */
-
-app.put("/api/employees/:id", verifyToken, async (req, res) => {
-
-  try {
-
-    if (req.user.role !== "Admin") {
-
-      return res.status(403).json({
-        error: "Admin only"
-      });
-    }
-
-    const { id } = req.params;
-
-    const {
-      fullName,
-      role
-    } = req.body;
-
-    await db.query(
-      `UPDATE employees
-       SET fullName = ?, role = ?
-       WHERE employeeNumber = ?`,
-      [
-        fullName,
-        role,
-        id
-      ]
-    );
-
-    res.json({
-      message: "Employee updated"
-    });
-
-  } catch (err) {
-
-    console.log(err);
-
-    res.status(500).json({
-      error: "Update failed"
-    });
-  }
-});
-
-/* ================= DELETE EMPLOYEE ================= */
-
-app.delete("/api/employees/:id", verifyToken, async (req, res) => {
-
-  try {
-
-    if (req.user.role !== "Admin") {
-
-      return res.status(403).json({
-        error: "Admin only"
-      });
-    }
-
-    await db.query(
-      "DELETE FROM employees WHERE employeeNumber=?",
-      [req.params.id]
-    );
-
-    res.json({
-      message: "Employee deleted"
-    });
-
-  } catch (err) {
-
-    console.log(err);
-
-    res.status(500).json({
-      error: "Delete failed"
-    });
+    res.status(500).json({ error: "Logout failed" });
   }
 });
 
 /* ================= ATTENDANCE ================= */
-
 app.get("/api/attendance", verifyToken, async (req, res) => {
-
   try {
-
-    let query = `
-      SELECT * FROM attendance
-    `;
-
-    let params = [];
-
-    if (req.user.role !== "Admin") {
-
-      query += `
-        WHERE employeeNumber = ?
-      `;
-
-      params.push(req.user.employeeNumber);
-    }
-
-    query += `
-      ORDER BY id DESC
-    `;
-
-    const [rows] = await db.query(query, params);
-
-    res.json(rows);
-
-  } catch (err) {
-
-    console.log(err);
-
-    res.status(500).json({
-      error: "Attendance failed"
-    });
-  }
-});
-
-/* ================= SALARY SUMMARY ================= */
-
-app.get("/api/salary-summary", verifyToken, async (req, res) => {
-
-  try {
-
-    if (req.user.role !== "Admin") {
-      return res.json([]);
-    }
-
-    const [rows] = await db.query(`
-      SELECT
-        employeeNumber,
-        MAX(fullName) AS fullName,
-        MAX(role) AS role,
-        ROUND(SUM(workedMinutes) / 60, 2) AS totalHours,
-        ROUND((SUM(workedMinutes) / 60) * 100, 2) AS salary
-      FROM attendance
-      GROUP BY employeeNumber
-      ORDER BY employeeNumber ASC
-    `);
-
-    res.json(rows);
-
-  } catch (err) {
-
-    console.log(err);
-
-    res.status(500).json({
-      error: "Salary summary failed"
-    });
-  }
-});
-
-/* ================= MONTHLY REPORT ================= */
-
-app.get("/api/salary-monthly", verifyToken, async (req, res) => {
-
-  try {
-
-    if (req.user.role !== "Admin") {
-      return res.json([]);
-    }
-
-    const { month, year } = req.query;
-
     const [rows] = await db.query(
-      `
-      SELECT
-        employeeNumber,
-        MAX(fullName) AS fullName,
-        MAX(role) AS role,
-        ROUND(SUM(workedMinutes)/60,2) AS totalHours,
-        ROUND((SUM(workedMinutes)/60)*100,2) AS salary
-      FROM attendance
-      WHERE MONTH(loginTime)=?
-      AND YEAR(loginTime)=?
-      GROUP BY employeeNumber
-      ORDER BY employeeNumber ASC
-      `,
-      [month, year]
+      "SELECT * FROM attendance ORDER BY id DESC"
     );
-
     res.json(rows);
-
   } catch (err) {
-
-    console.log(err);
-
-    res.status(500).json({
-      error: "Monthly report failed"
-    });
+    res.status(500).json({ error: "Attendance error" });
   }
 });
 
-/* ================= PAYSLIP ================= */
-
-app.get("/api/payslip/:id", verifyToken, async (req, res) => {
-
+/* ================= ADMIN ADD EMPLOYEE (SECURE) ================= */
+app.post("/api/employees", verifyToken, async (req, res) => {
   try {
-
     if (req.user.role !== "Admin") {
-
-      return res.status(403).json({
-        error: "Admin only"
-      });
+      return res.status(403).json({ error: "Admin only" });
     }
 
-    const [rows] = await db.query(
-      `
-      SELECT
-        employeeNumber,
-        MAX(fullName) AS fullName,
-        MAX(role) AS role,
-        ROUND(SUM(workedMinutes)/60,2) AS hours,
-        ROUND((SUM(workedMinutes)/60)*100,2) AS salary
-      FROM attendance
-      WHERE employeeNumber=?
-      GROUP BY employeeNumber
-      `,
-      [req.params.id]
+    const { employeeNumber, fullName, role, password } = req.body;
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    await db.query(
+      `INSERT INTO employees (employeeNumber, fullName, role, password)
+       VALUES (?, ?, ?, ?)`,
+      [employeeNumber, fullName, role, hashedPassword]
     );
 
-    if (!rows.length) {
-
-      return res.status(404).json({
-        error: "No payslip data"
-      });
-    }
-
-    const data = rows[0];
-
-    const doc = new PDFDocument();
-
-    res.setHeader(
-      "Content-Type",
-      "application/pdf"
-    );
-
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename=${req.params.id}-payslip.pdf`
-    );
-
-    doc.pipe(res);
-
-    doc.fontSize(20).text(
-      "SAFEPAK PAYSLIP",
-      {
-        align: "center"
-      }
-    );
-
-    doc.moveDown();
-
-    doc.fontSize(12).text(
-      `Employee No: ${data.employeeNumber}`
-    );
-
-    doc.text(
-      `Name: ${data.fullName}`
-    );
-
-    doc.text(
-      `Role: ${data.role}`
-    );
-
-    doc.text(
-      `Hours Worked: ${data.hours}`
-    );
-
-    doc.text(
-      `Salary: KSh ${data.salary}`
-    );
-
-    doc.end();
+    res.json({ message: "Employee added successfully" });
 
   } catch (err) {
-
     console.log(err);
-
-    res.status(500).json({
-      error: "Payslip failed"
-    });
+    res.status(500).json({ error: "Failed to add employee" });
   }
 });
 
-/* ================= START ================= */
+/* ================= START SERVER ================= */
+const PORT = process.env.PORT || 3000;
 
-const PORT = process.env.PORT || 5000;
-
-app.listen(PORT, () => {
-
-  console.log(
-    `Server running on port ${PORT}`
-  );
-
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 SafePak running on port ${PORT}`);
 });
