@@ -1,7 +1,6 @@
 require("dotenv").config();
 
 const express = require("express");
-const mysql = require("mysql2/promise");
 const cors = require("cors");
 const jwt = require("jsonwebtoken");
 const PDFDocument = require("pdfkit");
@@ -23,7 +22,7 @@ app.use((req, res, next) => {
 app.get("/", (req, res) => {
   res.json({
     status: "OK",
-    message: "SafePak API is running 🚀"
+    message: "SafePak API is running 🚀 (DEBUG MODE - NO DB)"
   });
 });
 
@@ -35,25 +34,13 @@ app.get("/test", (req, res) => {
   res.send("TEST OK");
 });
 
-/* ================= DB (STEP 1 + STEP 2 FIX) ================= */
+/* ================= TEMP DB (IMPORTANT DEBUG FIX) ================= */
 
-let db;
-
-async function initDB() {
-  try {
-    db = mysql.createPool({
-      host: process.env.DB_HOST,
-      user: process.env.DB_USER,
-      password: process.env.DB_PASSWORD,
-      database: process.env.DB_NAME,
-      port: process.env.DB_PORT || 3306
-    });
-
-    console.log("✅ DB initialized successfully");
-  } catch (err) {
-    console.log("❌ DB init failed:", err.message);
+const db = {
+  query: async () => {
+    return [[], []];
   }
-}
+};
 
 /* ================= SECRET ================= */
 
@@ -91,7 +78,7 @@ function verifyToken(req, res, next) {
 
 app.post("/api/login", async (req, res) => {
   try {
-    const { employeeNumber, password } = req.body;
+    const { employeeNumber } = req.body;
 
     const [rows] = await db.query(
       "SELECT * FROM employees WHERE employeeNumber=?",
@@ -99,30 +86,14 @@ app.post("/api/login", async (req, res) => {
     );
 
     if (!rows.length) {
-      return res.status(404).json({ error: "Employee not found" });
+      return res.status(404).json({ error: "Employee not found (mock DB)" });
     }
 
-    const user = rows[0];
-
-    if (user.employeeNumber === "001" && user.password !== password) {
-      return res.status(401).json({ error: "Wrong password" });
-    }
-
-    await db.query(
-      `UPDATE attendance
-       SET logoutTime = NOW(),
-       workedMinutes = TIMESTAMPDIFF(MINUTE, loginTime, NOW())
-       WHERE employeeNumber = ?
-       AND logoutTime IS NULL`,
-      [user.employeeNumber]
-    );
-
-    await db.query(
-      `INSERT INTO attendance
-      (employeeNumber, fullName, role, loginTime, workedMinutes, shift)
-      VALUES (?, ?, ?, NOW(), 0, ?)`,
-      [user.employeeNumber, user.fullName, user.role, getShift()]
-    );
+    const user = rows[0] || {
+      employeeNumber,
+      fullName: "Test User",
+      role: "Admin"
+    };
 
     const token = jwt.sign(
       { employeeNumber: user.employeeNumber, role: user.role },
@@ -141,119 +112,45 @@ app.post("/api/login", async (req, res) => {
 /* ================= LOGOUT ================= */
 
 app.post("/api/logout", verifyToken, async (req, res) => {
-  try {
-    await db.query(
-      `UPDATE attendance
-       SET logoutTime = NOW(),
-       workedMinutes = TIMESTAMPDIFF(MINUTE, loginTime, NOW())
-       WHERE employeeNumber = ?
-       AND logoutTime IS NULL`,
-      [req.user.employeeNumber]
-    );
-
-    res.json({ message: "Logged out" });
-
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ error: "Logout failed" });
-  }
+  res.json({ message: "Logged out (mock DB)" });
 });
 
 /* ================= EMPLOYEES ================= */
 
 app.post("/api/employees", verifyToken, async (req, res) => {
-  try {
-    if (req.user.role !== "Admin") {
-      return res.status(403).json({ error: "Admin only" });
-    }
-
-    const { employeeNumber, fullName, role } = req.body;
-
-    await db.query(
-      `INSERT INTO employees (employeeNumber, fullName, role)
-       VALUES (?, ?, ?)`,
-      [employeeNumber, fullName, role]
-    );
-
-    res.json({ message: "Employee saved" });
-
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ error: "Add employee failed" });
+  if (req.user.role !== "Admin") {
+    return res.status(403).json({ error: "Admin only" });
   }
+
+  res.json({ message: "Employee saved (mock DB)" });
 });
 
 app.put("/api/employees/:id", verifyToken, async (req, res) => {
-  try {
-    if (req.user.role !== "Admin") {
-      return res.status(403).json({ error: "Admin only" });
-    }
-
-    const { id } = req.params;
-    const { fullName, role } = req.body;
-
-    await db.query(
-      `UPDATE employees SET fullName=?, role=? WHERE employeeNumber=?`,
-      [fullName, role, id]
-    );
-
-    res.json({ message: "Employee updated" });
-
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ error: "Update failed" });
+  if (req.user.role !== "Admin") {
+    return res.status(403).json({ error: "Admin only" });
   }
+
+  res.json({ message: "Employee updated (mock DB)" });
 });
 
 app.delete("/api/employees/:id", verifyToken, async (req, res) => {
-  try {
-    if (req.user.role !== "Admin") {
-      return res.status(403).json({ error: "Admin only" });
-    }
-
-    await db.query(
-      "DELETE FROM employees WHERE employeeNumber=?",
-      [req.params.id]
-    );
-
-    res.json({ message: "Employee deleted" });
-
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ error: "Delete failed" });
+  if (req.user.role !== "Admin") {
+    return res.status(403).json({ error: "Admin only" });
   }
+
+  res.json({ message: "Employee deleted (mock DB)" });
 });
 
 /* ================= ATTENDANCE ================= */
 
 app.get("/api/attendance", verifyToken, async (req, res) => {
-  try {
-    let query = "SELECT * FROM attendance";
-    let params = [];
-
-    if (req.user.role !== "Admin") {
-      query += " WHERE employeeNumber=?";
-      params.push(req.user.employeeNumber);
-    }
-
-    query += " ORDER BY id DESC";
-
-    const [rows] = await db.query(query, params);
-    res.json(rows);
-
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ error: "Attendance failed" });
-  }
+  res.json([]);
 });
 
-/* ================= SERVER START (STEP 3 FIX) ================= */
+/* ================= SERVER START ================= */
 
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, "0.0.0.0", async () => {
-  console.log(`🚀 SafePak running on port ${PORT}`);
-
-  // initialize DB AFTER server starts (prevents Railway timeout)
-  await initDB();
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 SafePak running on port ${PORT} (DEBUG MODE)`);
 });
