@@ -27,14 +27,6 @@ app.get("/", (req, res) => {
   });
 });
 
-app.get("/nicholas", (req, res) => {
-  res.send("NICHOLAS TEST");
-});
-
-app.get("/test", (req, res) => {
-  res.send("TEST OK");
-});
-
 /* ================= DB ================= */
 
 const db = mysql.createPool({
@@ -48,16 +40,6 @@ const db = mysql.createPool({
 /* ================= SECRET ================= */
 
 const SECRET = process.env.SECRET || "safepak_secret";
-
-/* ================= SHIFT ================= */
-
-function getShift() {
-  const h = new Date().getHours();
-
-  if (h >= 6 && h < 14) return "Morning";
-  if (h >= 14 && h < 22) return "Afternoon";
-  return "Night";
-}
 
 /* ================= AUTH ================= */
 
@@ -77,12 +59,31 @@ function verifyToken(req, res, next) {
   }
 }
 
-/* ================= LOGIN ================= */
+/* ================= LOGIN (FIXED) ================= */
 
 app.post("/api/login", async (req, res) => {
   try {
-    const { employeeNumber } = req.body;
+    const { employeeNumber, password } = req.body;
 
+    // 🔥 TEST ADMIN LOGIN
+    if (employeeNumber === "001" && password === "2000") {
+      const token = jwt.sign(
+        { employeeNumber: "001", role: "Admin" },
+        SECRET,
+        { expiresIn: "1d" }
+      );
+
+      return res.json({
+        token,
+        user: {
+          employeeNumber: "001",
+          fullName: "Admin User",
+          role: "Admin"
+        }
+      });
+    }
+
+    // 🔥 DATABASE LOGIN
     const [rows] = await db.query(
       "SELECT * FROM employees WHERE employeeNumber=?",
       [employeeNumber]
@@ -111,13 +112,49 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
-/* ================= LOGOUT ================= */
+/* ================= ATTENDANCE (TEST DATA) ================= */
 
-app.post("/api/logout", verifyToken, async (req, res) => {
-  res.json({ message: "Logged out" });
+app.get("/api/attendance", verifyToken, async (req, res) => {
+  try {
+    res.json([
+      {
+        employeeNumber: "001",
+        fullName: "Admin User",
+        role: "Admin",
+        shift: "Morning",
+        loginTime: "08:00",
+        logoutTime: "16:00",
+        workedMinutes: 480,
+        workedHours: 8
+      },
+      {
+        employeeNumber: "EMP002",
+        fullName: "Mary Wanjiku",
+        role: "Supervisor",
+        shift: "Afternoon",
+        loginTime: "14:00",
+        logoutTime: null,
+        workedMinutes: 300,
+        workedHours: 5
+      },
+      {
+        employeeNumber: "EMP003",
+        fullName: "Peter Otieno",
+        role: "Security",
+        shift: "Night",
+        loginTime: "22:00",
+        logoutTime: "06:00",
+        workedMinutes: 480,
+        workedHours: 8
+      }
+    ]);
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: "Attendance error" });
+  }
 });
 
-/* ================= EMPLOYEES ================= */
+/* ================= EMPLOYEES (UNCHANGED) ================= */
 
 app.post("/api/employees", verifyToken, async (req, res) => {
   if (req.user.role !== "Admin") {
@@ -141,12 +178,6 @@ app.delete("/api/employees/:id", verifyToken, async (req, res) => {
   }
 
   res.json({ message: "Employee deleted" });
-});
-
-/* ================= ATTENDANCE ================= */
-
-app.get("/api/attendance", verifyToken, async (req, res) => {
-  res.json([]);
 });
 
 /* ================= SERVER START ================= */
