@@ -18,15 +18,6 @@ app.use((req, res, next) => {
   next();
 });
 
-/* ================= HEALTH ROUTES ================= */
-
-app.get("/", (req, res) => {
-  res.json({
-    status: "OK",
-    message: "SafePak API is running 🚀"
-  });
-});
-
 /* ================= DB ================= */
 
 const db = mysql.createPool({
@@ -45,10 +36,7 @@ const SECRET = process.env.SECRET || "safepak_secret";
 
 function verifyToken(req, res, next) {
   const auth = req.headers.authorization;
-
-  if (!auth) {
-    return res.status(401).json({ error: "No token" });
-  }
+  if (!auth) return res.status(401).json({ error: "No token" });
 
   try {
     const token = auth.split(" ")[1];
@@ -69,29 +57,44 @@ function getShift() {
   return "Night";
 }
 
-/* ================= ALLOCATION FUNCTION ================= */
+/* ================= CHECK ACTIVE LOGIN ================= */
 
-function assignResources(role) {
-  let machineNumber = null;
-  let godownNumber = null;
+async function isAlreadyLoggedIn(employeeNumber) {
+  const [rows] = await db.query(
+    "SELECT * FROM attendance WHERE employeeNumber=? AND logoutTime IS NULL",
+    [employeeNumber]
+  );
+  return rows.length > 0;
+}
 
-  if (role === "Admin") {
-    return { machineNumber: null, godownNumber: null };
+/* ================= MACHINE / GODOWN ALLOCATION ================= */
+
+async function assignMachine() {
+  const [rows] = await db.query(
+    "SELECT machineNumber FROM attendance WHERE logoutTime IS NULL AND machineNumber IS NOT NULL"
+  );
+
+  const used = rows.map(r => r.machineNumber);
+
+  for (let i = 1; i <= 130; i++) {
+    if (!used.includes(i)) return i;
   }
 
-  // Employees → ONLY machine
-  if (role === "Employee") {
-    machineNumber = Math.floor(Math.random() * 130) + 1;
-    return { machineNumber, godownNumber: null };
+  return null;
+}
+
+async function assignGodown() {
+  const [rows] = await db.query(
+    "SELECT godownNumber FROM attendance WHERE logoutTime IS NULL AND godownNumber IS NOT NULL"
+  );
+
+  const used = rows.map(r => r.godownNumber);
+
+  for (let i = 1; i <= 13; i++) {
+    if (!used.includes(i)) return i;
   }
 
-  // Cleaners + Supervisors → ONLY godown
-  if (role === "Cleaner" || role === "Supervisor") {
-    godownNumber = Math.floor(Math.random() * 13) + 1;
-    return { machineNumber: null, godownNumber };
-  }
-
-  return { machineNumber: null, godownNumber: null };
+  return null;
 }
 
 /* ================= LOGIN ================= */
@@ -110,11 +113,7 @@ app.post("/api/login", async (req, res) => {
 
       return res.json({
         token,
-        user: {
-          employeeNumber: "001",
-          fullName: "Admin User",
-          role: "Admin"
-        }
+        user: { employeeNumber: "001", role: "Admin", fullName: "Admin" }
       });
     }
 
@@ -130,33 +129,55 @@ app.post("/api/login", async (req, res) => {
 
     const user = rows[0];
 
+    /* ---------- BLOCK DOUBLE LOGIN ---------- */
+    const active = await isAlreadyLoggedIn(employeeNumber);
+
+    if (active) {
+      return res.status(400).json({
+        error: "Already logged in. Please logout first."
+      });
+    }
+
+    /* ---------- ASSIGN RESOURCES ---------- */
+    let machineNumber = null;
+    let godownNumber = null;
+
+    if (user.role === "Employee") {
+      machineNumber = await assignMachine();
+      if (!machineNumber) {
+        return res.status(400).json({ error: "No machines available" });
+      }
+    }
+
+    if (user.role === "Cleaner" || user.role === "Supervisor") {
+      godownNumber = await assignGodown();
+      if (!godownNumber) {
+        return res.status(400).json({ error: "No godowns available" });
+      }
+    }
+
+    /* ---------- INSERT ATTENDANCE ---------- */
+    await db.query(
+      `INSERT INTO attendance
+      (employeeNumber, fullName, role, loginTime, shift, attendanceDate, machineNumber, godownNumber, workedMinutes)
+      VALUES (?, ?, ?, NOW(), ?, CURDATE(), ?, ?, 0)`,
+      [
+        user.employeeNumber,
+        user.fullName,
+        user.role,
+        getShift(),
+        machineNumber,
+        godownNumber
+      ]
+    );
+
     const token = jwt.sign(
-      {
-        employeeNumber: user.employeeNumber,
-        role: user.role
-      },
+      { employeeNumber: user.employeeNumber, role: user.role },
       SECRET,
       { expiresIn: "1d" }
     );
 
-    /* ---------- ASSIGN MACHINE / GODOWN ---------- */
-    const { machineNumber, godownNumber } = assignResources(user.role);
-
-    /* ---------- INSERT ATTENDANCE ---------- */
-    await db.query(`
-      INSERT INTO attendance
-      (employeeNumber, fullName, role, loginTime, shift, attendanceDate, machineNumber, godownNumber, workedMinutes)
-      VALUES (?, ?, ?, NOW(), ?, CURDATE(), ?, ?, 0)
-    `, [
-      user.employeeNumber,
-      user.fullName,
-      user.role,
-      getShift(),
-      machineNumber,
-      godownNumber
-    ]);
-
-    res.json({ token, user });
+    res.json({ token, user, machineNumber, godownNumber });
 
   } catch (err) {
     console.log(err);
@@ -164,56 +185,62 @@ app.post("/api/login", async (req, res) => {
   }
 });
 
-/* ================= ATTENDANCE (REAL DB VERSION) ================= */
+/* ================= LOGOUT ================= */
 
-app.get("/api/attendance", verifyToken, async (req, res) => {
+app.post("/api/logout", verifyToken, async (req, res) => {
   try {
-    const [rows] = await db.query(`
-      SELECT *
-      FROM attendance
-      ORDER BY id DESC
-    `);
+    const employeeNumber = req.user.employeeNumber;
 
-    const result = rows.map(r => ({
-      ...r,
-      workedHours: r.workedMinutes ? Math.round(r.workedMinutes / 60) : 0
-    }));
+    await db.query(
+      `UPDATE attendance
+       SET logoutTime = NOW(),
+           workedMinutes = TIMESTAMPDIFF(MINUTE, loginTime, NOW())
+       WHERE employeeNumber=? AND logoutTime IS NULL`,
+      [employeeNumber]
+    );
 
-    res.json(result);
+    res.json({ message: "Logged out successfully" });
 
   } catch (err) {
     console.log(err);
+    res.status(500).json({ error: "Logout failed" });
+  }
+});
+
+/* ================= ATTENDANCE ================= */
+
+app.get("/api/attendance", verifyToken, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      "SELECT * FROM attendance ORDER BY id DESC"
+    );
+
+    res.json(rows);
+
+  } catch (err) {
     res.status(500).json({ error: "Attendance error" });
   }
 });
 
-/* ================= EMPLOYEES ================= */
+/* ================= ADMIN ADD EMPLOYEE ================= */
 
 app.post("/api/employees", verifyToken, async (req, res) => {
   if (req.user.role !== "Admin") {
     return res.status(403).json({ error: "Admin only" });
   }
 
-  res.json({ message: "Employee saved" });
+  const { employeeNumber, fullName, role, password } = req.body;
+
+  await db.query(
+    `INSERT INTO employees (employeeNumber, fullName, role, password)
+     VALUES (?, ?, ?, ?)`,
+    [employeeNumber, fullName, role, password]
+  );
+
+  res.json({ message: "Employee added successfully" });
 });
 
-app.put("/api/employees/:id", verifyToken, async (req, res) => {
-  if (req.user.role !== "Admin") {
-    return res.status(403).json({ error: "Admin only" });
-  }
-
-  res.json({ message: "Employee updated" });
-});
-
-app.delete("/api/employees/:id", verifyToken, async (req, res) => {
-  if (req.user.role !== "Admin") {
-    return res.status(403).json({ error: "Admin only" });
-  }
-
-  res.json({ message: "Employee deleted" });
-});
-
-/* ================= SERVER START ================= */
+/* ================= START SERVER ================= */
 
 const PORT = process.env.PORT || 3000;
 
