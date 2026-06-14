@@ -45,7 +45,7 @@ export default function Dashboard({ user }) {
   // Logout
   const handleLogout = async () => {
     try {
-      await fetch("http://localhost:5000/api/logout", {
+      await fetch("https://safepak-system.onrender.com/api/logout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ employeeNumber: user.employeeNumber }),
