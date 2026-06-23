@@ -25,19 +25,6 @@ const db = mysql.createPool({
 
 const SECRET = process.env.SECRET || "safepak_secret";
 
-/* ================= RATE LIMIT ================= */
-app.use("/api/login", rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  message: { error: "Too many login attempts. Try again later." }
-}));
-
-/* ================= LOGGING ================= */
-app.use((req, res, next) => {
-  console.log("➡️", req.method, req.url);
-  next();
-});
-
 /* ================= AUTH ================= */
 function verifyToken(req, res, next) {
   const auth = req.headers.authorization;
@@ -53,23 +40,11 @@ function verifyToken(req, res, next) {
   }
 }
 
-/* ================= SHIFT ================= */
-function getShift() {
-  const h = new Date().getHours();
-
-  if (h >= 6 && h < 14) return "Morning";
-  if (h >= 14 && h < 22) return "Afternoon";
-  return "Night";
-}
-
 /* ================= LOGIN ================= */
 app.post("/api/login", async (req, res) => {
   try {
     const { employeeNumber, password } = req.body;
 
-    console.log("LOGIN BODY:", req.body);
-
-    /* ---------- ADMIN LOGIN ---------- */
     if (employeeNumber === "001" && password === "2000") {
       const token = jwt.sign(
         { employeeNumber: "001", role: "Admin" },
@@ -79,15 +54,10 @@ app.post("/api/login", async (req, res) => {
 
       return res.json({
         token,
-        user: {
-          employeeNumber: "001",
-          role: "Admin",
-          fullName: "Admin"
-        }
+        user: { employeeNumber: "001", role: "Admin", fullName: "Admin" }
       });
     }
 
-    /* ---------- FIND EMPLOYEE ---------- */
     const [rows] = await db.query(
       "SELECT * FROM employees WHERE employeeNumber=?",
       [employeeNumber]
@@ -99,12 +69,10 @@ app.post("/api/login", async (req, res) => {
 
     const user = rows[0];
 
-    /* ---------- SIMPLE PASSWORD CHECK (NO BCRYPT) ---------- */
     if (password !== user.password) {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    /* ---------- TOKEN ---------- */
     const token = jwt.sign(
       { employeeNumber: user.employeeNumber, role: user.role },
       SECRET,
@@ -114,43 +82,11 @@ app.post("/api/login", async (req, res) => {
     res.json({ token, user });
 
   } catch (err) {
-    console.log(err);
     res.status(500).json({ error: "Login failed" });
   }
 });
 
-/* ================= LOGOUT ================= */
-app.post("/api/logout", verifyToken, async (req, res) => {
-  try {
-    await db.query(
-      `UPDATE attendance
-       SET logoutTime = NOW(),
-           workedMinutes = TIMESTAMPDIFF(MINUTE, loginTime, NOW())
-       WHERE employeeNumber=? AND logoutTime IS NULL`,
-      [req.user.employeeNumber]
-    );
-
-    res.json({ message: "Logged out successfully" });
-
-  } catch (err) {
-    res.status(500).json({ error: "Logout failed" });
-  }
-});
-
-/* ================= ATTENDANCE ================= */
-app.get("/api/attendance", verifyToken, async (req, res) => {
-  try {
-    const [rows] = await db.query(
-      "SELECT * FROM attendance ORDER BY id DESC"
-    );
-
-    res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: "Attendance error" });
-  }
-});
-
-/* ================= ADD EMPLOYEE (NO BCRYPT) ================= */
+/* ================= ADD EMPLOYEE (FIXED) ================= */
 app.post("/api/employees", verifyToken, async (req, res) => {
   try {
     if (req.user.role !== "Admin") {
@@ -159,23 +95,35 @@ app.post("/api/employees", verifyToken, async (req, res) => {
 
     const { employeeNumber, fullName, role, password } = req.body;
 
-    await db.query(
-      `INSERT INTO employees (employeeNumber, fullName, role, password)
-       VALUES (?, ?, ?, ?)`,
-      [employeeNumber, fullName, role, password]
-    );
+    // 🔥 FIX: prevent 500 crash
+    if (!employeeNumber || !fullName || !role || !password) {
+      return res.status(400).json({ error: "All fields required" });
+    }
+
+    const sql = `
+      INSERT INTO employees (employeeNumber, fullName, role, password)
+      VALUES (?, ?, ?, ?)
+    `;
+
+    await db.query(sql, [
+      employeeNumber,
+      fullName,
+      role,
+      password
+    ]);
 
     res.json({ message: "Employee added successfully" });
 
   } catch (err) {
-    console.log(err);
-    res.status(500).json({ error: "Failed to add employee" });
+    console.log("EMPLOYEE ERROR:", err);
+    res.status(500).json({
+      error: err.sqlMessage || err.message
+    });
   }
 });
 
-/* ================= START SERVER ================= */
+/* ================= SERVER ================= */
 const PORT = process.env.PORT || 5000;
-
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 SafePak running on port ${PORT}`);
+  console.log("🚀 Server running on port", PORT);
 });
