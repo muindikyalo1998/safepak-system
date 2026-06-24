@@ -20,7 +20,7 @@ app.use(cors({
 
 app.use(express.json());
 
-/* ================= REQUEST LOGGING ================= */
+/* ================= LOGGING ================= */
 app.use((req, res, next) => {
   console.log("➡️", req.method, req.url);
   next();
@@ -71,16 +71,13 @@ app.use("/api/login", rateLimit({
 function verifyToken(req, res, next) {
   const auth = req.headers.authorization;
 
-  if (!auth) {
-    return res.status(401).json({ error: "No token provided" });
-  }
+  if (!auth) return res.status(401).json({ error: "No token provided" });
 
   try {
     const token = auth.split(" ")[1];
     req.user = jwt.verify(token, SECRET);
     next();
   } catch (err) {
-    console.log("TOKEN ERROR:", err.message);
     return res.status(401).json({ error: "Invalid token" });
   }
 }
@@ -88,11 +85,9 @@ function verifyToken(req, res, next) {
 /* ================= LOGIN ================= */
 app.post("/api/login", async (req, res) => {
   try {
-    console.log("LOGIN BODY:", req.body);
-
     const { employeeNumber, password } = req.body;
 
-    /* ADMIN LOGIN */
+    /* ADMIN LOGIN (fallback) */
     if (employeeNumber === "001" && password === "2000") {
       const token = jwt.sign(
         { employeeNumber: "001", role: "Admin" },
@@ -110,9 +105,7 @@ app.post("/api/login", async (req, res) => {
       });
     }
 
-    if (!db) {
-      return res.status(500).json({ error: "Database not ready" });
-    }
+    if (!db) return res.status(500).json({ error: "Database not ready" });
 
     const [rows] = await db.query(
       "SELECT * FROM employees WHERE employeeNumber=?",
@@ -138,20 +131,31 @@ app.post("/api/login", async (req, res) => {
     res.json({ token, user });
 
   } catch (err) {
-    console.log("LOGIN ERROR:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
-    res.status(500).json({
-      error: err.sqlMessage || err.message || "Login failed"
-    });
+/* ================= CREATE ADMIN (TEMP FIX) ================= */
+app.get("/create-admin", async (req, res) => {
+  try {
+    if (!db) return res.status(500).json({ error: "DB not ready" });
+
+    await db.query(`
+      INSERT INTO employees (employeeNumber, fullName, role, password)
+      VALUES ('001', 'Admin', 'Admin', '2000')
+    `);
+
+    res.json({ message: "Admin created successfully" });
+
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
 /* ================= ATTENDANCE ================= */
 app.get("/api/attendance", verifyToken, async (req, res) => {
   try {
-    if (!db) {
-      return res.status(500).json({ error: "Database not ready" });
-    }
+    if (!db) return res.status(500).json({ error: "DB not ready" });
 
     const [rows] = await db.query(
       "SELECT * FROM attendance ORDER BY id DESC"
@@ -160,21 +164,13 @@ app.get("/api/attendance", verifyToken, async (req, res) => {
     res.json(rows);
 
   } catch (err) {
-    console.log("ATTENDANCE ERROR:", err.message);
-
-    res.status(500).json({
-      error: err.sqlMessage || err.message
-    });
+    res.status(500).json({ error: err.message });
   }
 });
 
 /* ================= LOGOUT ================= */
 app.post("/api/logout", verifyToken, async (req, res) => {
-  try {
-    res.json({ message: "Logged out successfully" });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+  res.json({ message: "Logged out successfully" });
 });
 
 /* ================= ADD EMPLOYEE ================= */
@@ -184,15 +180,9 @@ app.post("/api/employees", verifyToken, async (req, res) => {
       return res.status(403).json({ error: "Admin only" });
     }
 
-    if (!db) {
-      return res.status(500).json({ error: "Database not ready" });
-    }
+    if (!db) return res.status(500).json({ error: "DB not ready" });
 
     const { employeeNumber, fullName, role, password } = req.body;
-
-    if (!employeeNumber || !fullName || !role || !password) {
-      return res.status(400).json({ error: "All fields required" });
-    }
 
     await db.query(
       `INSERT INTO employees (employeeNumber, fullName, role, password)
@@ -203,11 +193,7 @@ app.post("/api/employees", verifyToken, async (req, res) => {
     res.json({ message: "Employee added successfully" });
 
   } catch (err) {
-    console.log("EMPLOYEE ERROR:", err.message);
-
-    res.status(500).json({
-      error: err.sqlMessage || err.message
-    });
+    res.status(500).json({ error: err.message });
   }
 });
 
