@@ -14,7 +14,10 @@ app.use(helmet());
 app.use(cors());
 app.use(express.json());
 
-/* ================= DB ================= */
+/* ================= DB ================= */ 
+console.log("DB_HOST =", process.env.DB_HOST);
+console.log("DB_NAME =", process.env.DB_NAME);
+console.log("DB_USER =", process.env.DB_USER);
 const db = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
