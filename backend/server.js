@@ -36,15 +36,27 @@ console.log("DB_HOST =", process.env.DB_HOST);
 console.log("DB_NAME =", process.env.DB_NAME);
 console.log("DB_USER =", process.env.DB_USER);
 
-const db = mysql.createPool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  port: process.env.DB_PORT,
-  waitForConnections: true,
-  connectionLimit: 10
-});
+let db;
+
+async function initDB() {
+  try {
+    db = await mysql.createPool({
+      host: process.env.DB_HOST,
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      database: process.env.DB_NAME,
+      port: process.env.DB_PORT,
+      waitForConnections: true,
+      connectionLimit: 10
+    });
+
+    console.log("✅ Database connected successfully");
+  } catch (err) {
+    console.log("❌ Database connection failed:", err.message);
+  }
+}
+
+initDB();
 
 const SECRET = process.env.SECRET || "safepak_secret";
 
@@ -68,7 +80,7 @@ function verifyToken(req, res, next) {
     req.user = jwt.verify(token, SECRET);
     next();
   } catch (err) {
-    console.log("TOKEN ERROR:", err);
+    console.log("TOKEN ERROR:", err.message);
     return res.status(401).json({ error: "Invalid token" });
   }
 }
@@ -83,10 +95,7 @@ app.post("/api/login", async (req, res) => {
     /* ADMIN LOGIN */
     if (employeeNumber === "001" && password === "2000") {
       const token = jwt.sign(
-        {
-          employeeNumber: "001",
-          role: "Admin"
-        },
+        { employeeNumber: "001", role: "Admin" },
         SECRET,
         { expiresIn: "1d" }
       );
@@ -101,31 +110,27 @@ app.post("/api/login", async (req, res) => {
       });
     }
 
-    /* EMPLOYEE LOGIN */
+    if (!db) {
+      return res.status(500).json({ error: "Database not ready" });
+    }
+
     const [rows] = await db.query(
       "SELECT * FROM employees WHERE employeeNumber=?",
       [employeeNumber]
     );
 
     if (!rows.length) {
-      return res.status(404).json({
-        error: "Employee not found"
-      });
+      return res.status(404).json({ error: "Employee not found" });
     }
 
     const user = rows[0];
 
     if (password !== user.password) {
-      return res.status(401).json({
-        error: "Invalid credentials"
-      });
+      return res.status(401).json({ error: "Invalid credentials" });
     }
 
     const token = jwt.sign(
-      {
-        employeeNumber: user.employeeNumber,
-        role: user.role
-      },
+      { employeeNumber: user.employeeNumber, role: user.role },
       SECRET,
       { expiresIn: "1d" }
     );
@@ -133,7 +138,7 @@ app.post("/api/login", async (req, res) => {
     res.json({ token, user });
 
   } catch (err) {
-    console.log("LOGIN ERROR:", err);
+    console.log("LOGIN ERROR:", err.message);
 
     res.status(500).json({
       error: err.sqlMessage || err.message || "Login failed"
@@ -144,6 +149,10 @@ app.post("/api/login", async (req, res) => {
 /* ================= ATTENDANCE ================= */
 app.get("/api/attendance", verifyToken, async (req, res) => {
   try {
+    if (!db) {
+      return res.status(500).json({ error: "Database not ready" });
+    }
+
     const [rows] = await db.query(
       "SELECT * FROM attendance ORDER BY id DESC"
     );
@@ -151,7 +160,7 @@ app.get("/api/attendance", verifyToken, async (req, res) => {
     res.json(rows);
 
   } catch (err) {
-    console.log("ATTENDANCE ERROR:", err);
+    console.log("ATTENDANCE ERROR:", err.message);
 
     res.status(500).json({
       error: err.sqlMessage || err.message
@@ -162,15 +171,9 @@ app.get("/api/attendance", verifyToken, async (req, res) => {
 /* ================= LOGOUT ================= */
 app.post("/api/logout", verifyToken, async (req, res) => {
   try {
-    res.json({
-      message: "Logged out successfully"
-    });
+    res.json({ message: "Logged out successfully" });
   } catch (err) {
-    console.log("LOGOUT ERROR:", err);
-
-    res.status(500).json({
-      error: err.message
-    });
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -178,42 +181,29 @@ app.post("/api/logout", verifyToken, async (req, res) => {
 app.post("/api/employees", verifyToken, async (req, res) => {
   try {
     if (req.user.role !== "Admin") {
-      return res.status(403).json({
-        error: "Admin only"
-      });
+      return res.status(403).json({ error: "Admin only" });
     }
 
-    const {
-      employeeNumber,
-      fullName,
-      role,
-      password
-    } = req.body;
+    if (!db) {
+      return res.status(500).json({ error: "Database not ready" });
+    }
+
+    const { employeeNumber, fullName, role, password } = req.body;
 
     if (!employeeNumber || !fullName || !role || !password) {
-      return res.status(400).json({
-        error: "All fields required"
-      });
+      return res.status(400).json({ error: "All fields required" });
     }
 
     await db.query(
-      `INSERT INTO employees
-      (employeeNumber, fullName, role, password)
-      VALUES (?, ?, ?, ?)`,
-      [
-        employeeNumber,
-        fullName,
-        role,
-        password
-      ]
+      `INSERT INTO employees (employeeNumber, fullName, role, password)
+       VALUES (?, ?, ?, ?)`,
+      [employeeNumber, fullName, role, password]
     );
 
-    res.json({
-      message: "Employee added successfully"
-    });
+    res.json({ message: "Employee added successfully" });
 
   } catch (err) {
-    console.log("EMPLOYEE ERROR:", err);
+    console.log("EMPLOYEE ERROR:", err.message);
 
     res.status(500).json({
       error: err.sqlMessage || err.message
@@ -222,7 +212,7 @@ app.post("/api/employees", verifyToken, async (req, res) => {
 });
 
 /* ================= SERVER ================= */
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log("🚀 Server running on Railway port", PORT);
