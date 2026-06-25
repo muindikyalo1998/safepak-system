@@ -1,5 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import axios from "axios";
+
+const API_BASE = "https://safepak-system-production.up.railway.app";
 
 function App() {
   const [employees, setEmployees] = useState([]);
@@ -15,28 +17,10 @@ function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [token, setToken] = useState("");
 
-  // =====================
-  // FETCH EMPLOYEES (ONLY AFTER LOGIN)
-  // =====================
-  const fetchEmployees = async (authToken) => {
-    try {
-      const res = await axios.get("/api/attendance", {
-        headers: {
-          Authorization: `Bearer ${authToken}`,
-        },
-      });
-      setEmployees(res.data);
-    } catch (err) {
-      console.log("Error fetching:", err);
-    }
-  };
-
-  // =====================
-  // LOGIN (FIXED)
-  // =====================
+  /* ================= LOGIN ================= */
   const login = async () => {
     try {
-      const res = await axios.post("/api/login", {
+      const res = await axios.post(`${API_BASE}/api/login`, {
         employeeNumber: loginEmpNo,
         password: loginPassword,
       });
@@ -45,41 +29,50 @@ function App() {
       setToken(res.data.token);
 
       alert("Login successful");
-
-      fetchEmployees(res.data.token);
     } catch (err) {
       alert(err.response?.data?.error || "Login failed");
     }
   };
 
-  // =====================
-  // LOGOUT
-  // =====================
-  const logout = async () => {
+  /* ================= FETCH DATA ================= */
+  const fetchAttendance = async (authToken) => {
     try {
-      await axios.post(
-        "/api/logout",
-        {},
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
+      const res = await axios.get(`${API_BASE}/api/attendance`, {
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+        },
+      });
 
-      setCurrentUser(null);
-      setToken("");
-      setLoginEmpNo("");
-      setLoginPassword("");
-      setEmployees([]);
+      setEmployees(res.data);
     } catch (err) {
-      console.log(err);
+      console.log("Fetch error:", err.message);
     }
   };
 
-  // =====================
-  // ADD EMPLOYEE (FIXED)
-  // =====================
+  useEffect(() => {
+    if (token) {
+      fetchAttendance(token);
+    }
+  }, [token]);
+
+  /* ================= LOGOUT ================= */
+const logout = () => {
+setCurrentUser(null);
+setToken("");
+setEmployees([]);
+
+setLoginEmpNo("");
+setLoginPassword("");
+
+setEmpNo("");
+setFullName("");
+setRole("");
+setPassword("");
+
+window.location.href = "/";
+};
+
+  /* ================= ADD EMPLOYEE ================= */
   const addEmployee = async () => {
     if (!empNo || !fullName || !role || !password) {
       alert("All fields required");
@@ -88,7 +81,7 @@ function App() {
 
     try {
       await axios.post(
-        "/api/employees",
+        `${API_BASE}/api/employees`,
         {
           employeeNumber: empNo,
           fullName,
@@ -145,11 +138,11 @@ function App() {
       {currentUser && (
         <div>
           <h3>Welcome {currentUser.fullName}</h3>
+
           <button onClick={logout}>Logout</button>
 
           <hr />
 
-          {/* ================= ADD EMPLOYEE ================= */}
           <h3>Add Employee</h3>
 
           <input
@@ -185,16 +178,19 @@ function App() {
 
           <hr />
 
-          {/* ================= ATTENDANCE ================= */}
-          <h3>Attendance Records</h3>
+          <h3>Records</h3>
 
-          <ul>
-            {employees.map((a, index) => (
-              <li key={index}>
-                {a.employeeNumber} - {a.fullName} - {a.role}
-              </li>
-            ))}
-          </ul>
+          {employees.length === 0 ? (
+            <p>No data yet (attendance table is empty)</p>
+          ) : (
+            <ul>
+              {employees.map((a, i) => (
+                <li key={i}>
+                  {a.employeeNumber} - {a.fullName} - {a.role}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
     </div>
