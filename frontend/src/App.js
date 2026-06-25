@@ -116,18 +116,23 @@ window.location.href = "/";
           <h3>Login</h3>
 
           <input
-            placeholder="Employee Number"
-            value={loginEmpNo}
-            onChange={(e) => setLoginEmpNo(e.target.value)}
-          />
+  type="text"
+  name="login-employee-number"
+  autoComplete="off"
+  placeholder="Employee Number"
+  value={loginEmpNo}
+  onChange={(e) => setLoginEmpNo(e.target.value)}
+/>
           <br />
 
           <input
-            type="password"
-            placeholder="Password"
-            value={loginPassword}
-            onChange={(e) => setLoginPassword(e.target.value)}
-          />
+  type="password"
+  name="new-employee-password"
+  autoComplete="new-password"
+  placeholder="Password"
+  value={password}
+  onChange={(e) => setPassword(e.target.value)}
+/>
           <br />
 
           <button onClick={login}>Login</button>
@@ -146,24 +151,29 @@ window.location.href = "/";
           <h3>Add Employee</h3>
 
           <input
-            placeholder="Employee Number"
-            value={empNo}
-            onChange={(e) => setEmpNo(e.target.value)}
-          />
+  type="text"
+  name="new-employee-number"
+  autoComplete="off"
+  placeholder="Employee Number"
+  value={empNo}
+  onChange={(e) => setEmpNo(e.target.value)}
+/>
           <br />
 
           <input
-            placeholder="Full Name"
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-          />
+  autoComplete="off"
+  placeholder="Full Name"
+  value={fullName}
+  onChange={(e) => setFullName(e.target.value)}
+/>
           <br />
 
           <input
-            placeholder="Role"
-            value={role}
-            onChange={(e) => setRole(e.target.value)}
-          />
+  autoComplete="off"
+  placeholder="Role"
+  value={role}
+  onChange={(e) => setRole(e.target.value)}
+/>
           <br />
 
           <input
