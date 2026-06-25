@@ -152,7 +152,7 @@ const logout = async () => {
   value={loginPassword}
   onChange={(e) => setLoginPassword(e.target.value)}
 />
-<p>Debug Password: {loginPassword}</p>
+
           <br />
 
           <button onClick={login}>Login</button>
@@ -224,8 +224,12 @@ const logout = async () => {
             <ul>
               {employees.map((a, i) => (
                 <li key={i}>
-                  {a.employeeNumber} - {a.fullName} - {a.role}
-                </li>
+  {a.employeeNumber} - {a.fullName} - {a.role}
+  <br />
+  Login: {a.loginTime}
+  <br />
+  Logout: {a.logoutTime || "Still Logged In"}
+</li>
               ))}
             </ul>
           )}
