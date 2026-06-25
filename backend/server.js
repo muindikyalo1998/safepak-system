@@ -117,14 +117,16 @@ console.log("password =", password);
     }
 
     const [rows] = await db.query(
-      "SELECT * FROM employees WHERE employeeNumber=?",
-      [employeeNumber]
-    );
+  "SELECT * FROM employees WHERE employeeNumber=?",
+  [employeeNumber]
+);
 
-    if (!rows.length) {
-      return res.status(404).json({ error: "Employee not found" });
-    }
+console.log("Employees found:", rows.length);
+console.log(rows);
 
+if (!rows.length) {
+  return res.status(404).json({ error: "Employee not found" });
+}
     const user = rows[0];
 
     if (password !== user.password) {
