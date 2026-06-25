@@ -90,6 +90,9 @@ function verifyToken(req, res, next) {
 app.post("/api/login", async (req, res) => {
   try {
     const { employeeNumber, password } = req.body;
+    console.log("LOGIN ATTEMPT");
+console.log("employeeNumber =", employeeNumber);
+console.log("password =", password);
 
     /* ADMIN FALLBACK */
     if (employeeNumber === "001" && password === "2000") {
@@ -125,6 +128,7 @@ app.post("/api/login", async (req, res) => {
     const user = rows[0];
 
     if (password !== user.password) {
+      console.log("DB password =", user.password);
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
