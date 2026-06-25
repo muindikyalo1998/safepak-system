@@ -19,11 +19,17 @@ function App() {
 
   /* ================= LOGIN ================= */
   const login = async () => {
-    try {
-      const res = await axios.post(`${API_BASE}/api/login`, {
-        employeeNumber: loginEmpNo,
-        password: loginPassword,
-      });
+  try {
+
+    console.log("Sending login:", {
+      employeeNumber: loginEmpNo,
+      password: loginPassword,
+    });
+
+    const res = await axios.post(`${API_BASE}/api/login`, {
+      employeeNumber: loginEmpNo,
+      password: loginPassword,
+    });
 
       setCurrentUser(res.data.user);
       setToken(res.data.token);
@@ -127,12 +133,13 @@ window.location.href = "/";
 
           <input
   type="password"
-  name="new-employee-password"
+  name="login-password"
   autoComplete="new-password"
   placeholder="Password"
-  value={password}
-  onChange={(e) => setPassword(e.target.value)}
+  value={loginPassword}
+  onChange={(e) => setLoginPassword(e.target.value)}
 />
+<p>Debug Password: {loginPassword}</p>
           <br />
 
           <button onClick={login}>Login</button>
@@ -177,11 +184,13 @@ window.location.href = "/";
           <br />
 
           <input
-            type="password"
-            placeholder="Password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
+  type="password"
+  name="new-employee-password"
+  autoComplete="new-password"
+  placeholder="Password"
+  value={password}
+  onChange={(e) => setPassword(e.target.value)}
+/>
           <br />
 
           <button onClick={addEmployee}>Add Employee</button>
