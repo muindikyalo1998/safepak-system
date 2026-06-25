@@ -96,22 +96,34 @@ console.log("password =", password);
 
     /* ADMIN FALLBACK */
     if (employeeNumber === "001" && password === "2000") {
-      const token = jwt.sign(
-        { employeeNumber: "001", role: "Admin" },
-        SECRET,
-        { expiresIn: "1d" }
-      );
 
-      return res.json({
-        token,
-        user: {
-          employeeNumber: "001",
-          role: "Admin",
-          fullName: "Admin"
-        }
-      });
+  await db.query(
+    `INSERT INTO attendance
+    (id, employeeNumber, fullName, role, loginTime)
+    VALUES (?, ?, ?, ?, NOW())`,
+    [
+      Date.now().toString(),
+      "001",
+      "Admin",
+      "Admin"
+    ]
+  );
+
+  const token = jwt.sign(
+    { employeeNumber: "001", role: "Admin" },
+    SECRET,
+    { expiresIn: "1d" }
+  );
+
+  return res.json({
+    token,
+    user: {
+      employeeNumber: "001",
+      role: "Admin",
+      fullName: "Admin"
     }
-
+  });
+}
     if (!db) {
       return res.status(500).json({ error: "Database not ready" });
     }
@@ -128,7 +140,17 @@ if (!rows.length) {
   return res.status(404).json({ error: "Employee not found" });
 }
     const user = rows[0];
-
+await db.query(
+  `INSERT INTO attendance
+  (id, employeeNumber, fullName, role, loginTime)
+  VALUES (?, ?, ?, ?, NOW())`,
+  [
+    Date.now().toString(),
+    user.employeeNumber,
+    user.fullName,
+    user.role
+  ]
+);
     if (password !== user.password) {
       console.log("DB password =", user.password);
       return res.status(401).json({ error: "Invalid credentials" });
