@@ -208,18 +208,22 @@ app.get("/api/attendance", verifyToken, async (req, res) => {
 
     if (req.user.role === "Admin") {
 
-      [rows] = await db.query(
-        "SELECT * FROM attendance ORDER BY loginTime DESC"
-      );
+  console.log("ADMIN VIEW:", req.user.employeeNumber);
 
-    } else {
+  [rows] = await db.query(
+    "SELECT * FROM attendance ORDER BY loginTime DESC"
+  );
 
-      [rows] = await db.query(
-        "SELECT * FROM attendance WHERE employeeNumber = ? ORDER BY loginTime DESC",
-        [req.user.employeeNumber]
-      );
+} else {
 
-    }
+  console.log("EMPLOYEE VIEW:", req.user.employeeNumber);
+
+  [rows] = await db.query(
+    "SELECT * FROM attendance WHERE employeeNumber = ? ORDER BY loginTime DESC",
+    [req.user.employeeNumber]
+  );
+
+}
 
     res.json(rows);
 
