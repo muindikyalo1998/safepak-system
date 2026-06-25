@@ -203,13 +203,23 @@ app.get("/create-admin", async (req, res) => {
 /* ================= ATTENDANCE ================= */
 app.get("/api/attendance", verifyToken, async (req, res) => {
   try {
-    if (!db) {
-      return res.status(500).json({ error: "DB not ready" });
-    }
 
-    const [rows] = await db.query(
-      "SELECT * FROM attendance ORDER BY id DESC"
-    );
+    let rows;
+
+    if (req.user.role === "Admin") {
+
+      [rows] = await db.query(
+        "SELECT * FROM attendance ORDER BY loginTime DESC"
+      );
+
+    } else {
+
+      [rows] = await db.query(
+        "SELECT * FROM attendance WHERE employeeNumber = ? ORDER BY loginTime DESC",
+        [req.user.employeeNumber]
+      );
+
+    }
 
     res.json(rows);
 
