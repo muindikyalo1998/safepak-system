@@ -38,21 +38,22 @@ console.log("DB_USER =", process.env.DB_USER);
 
 let db;
 
+/* FIXED DB INIT */
 async function initDB() {
   try {
-    db = await mysql.createPool({
+    db = mysql.createPool({
       host: process.env.DB_HOST,
       user: process.env.DB_USER,
       password: process.env.DB_PASSWORD,
       database: process.env.DB_NAME,
-      port: process.env.DB_PORT,
+      port: process.env.DB_PORT || 3306,
       waitForConnections: true,
       connectionLimit: 10
     });
 
     console.log("✅ Database connected successfully");
   } catch (err) {
-    console.log("❌ Database connection failed:", err.message);
+    console.log("❌ DB connection failed:", err.message);
   }
 }
 
@@ -71,7 +72,9 @@ app.use("/api/login", rateLimit({
 function verifyToken(req, res, next) {
   const auth = req.headers.authorization;
 
-  if (!auth) return res.status(401).json({ error: "No token provided" });
+  if (!auth) {
+    return res.status(401).json({ error: "No token provided" });
+  }
 
   try {
     const token = auth.split(" ")[1];
@@ -87,7 +90,7 @@ app.post("/api/login", async (req, res) => {
   try {
     const { employeeNumber, password } = req.body;
 
-    /* ADMIN LOGIN (fallback) */
+    /* ADMIN FALLBACK */
     if (employeeNumber === "001" && password === "2000") {
       const token = jwt.sign(
         { employeeNumber: "001", role: "Admin" },
@@ -105,7 +108,9 @@ app.post("/api/login", async (req, res) => {
       });
     }
 
-    if (!db) return res.status(500).json({ error: "Database not ready" });
+    if (!db) {
+      return res.status(500).json({ error: "Database not ready" });
+    }
 
     const [rows] = await db.query(
       "SELECT * FROM employees WHERE employeeNumber=?",
@@ -131,23 +136,37 @@ app.post("/api/login", async (req, res) => {
     res.json({ token, user });
 
   } catch (err) {
+    console.log("LOGIN ERROR:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-/* ================= CREATE ADMIN (TEMP FIX) ================= */
+/* ================= CREATE ADMIN (FIXED + SAFE) ================= */
 app.get("/create-admin", async (req, res) => {
   try {
-    if (!db) return res.status(500).json({ error: "DB not ready" });
+    if (!db) {
+      return res.status(500).json({ error: "DB not ready" });
+    }
 
-    await db.query(`
-      INSERT INTO employees (employeeNumber, fullName, role, password)
-      VALUES ('001', 'Admin', 'Admin', '2000')
-    `);
+    // check if admin exists
+    const [existing] = await db.query(
+      "SELECT * FROM employees WHERE employeeNumber = ?",
+      ["001"]
+    );
+
+    if (existing.length > 0) {
+      return res.json({ message: "Admin already exists" });
+    }
+
+    await db.query(
+      "INSERT INTO employees (employeeNumber, fullName, role, password) VALUES (?, ?, ?, ?)",
+      ["001", "Admin", "Admin", "2000"]
+    );
 
     res.json({ message: "Admin created successfully" });
 
   } catch (err) {
+    console.log("ADMIN ERROR:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -155,7 +174,9 @@ app.get("/create-admin", async (req, res) => {
 /* ================= ATTENDANCE ================= */
 app.get("/api/attendance", verifyToken, async (req, res) => {
   try {
-    if (!db) return res.status(500).json({ error: "DB not ready" });
+    if (!db) {
+      return res.status(500).json({ error: "DB not ready" });
+    }
 
     const [rows] = await db.query(
       "SELECT * FROM attendance ORDER BY id DESC"
@@ -180,23 +201,58 @@ app.post("/api/employees", verifyToken, async (req, res) => {
       return res.status(403).json({ error: "Admin only" });
     }
 
-    if (!db) return res.status(500).json({ error: "DB not ready" });
+    if (!db) {
+      return res.status(500).json({ error: "DB not ready" });
+    }
 
     const { employeeNumber, fullName, role, password } = req.body;
 
-    await db.query(
-      `INSERT INTO employees (employeeNumber, fullName, role, password)
-       VALUES (?, ?, ?, ?)`,
-      [employeeNumber, fullName, role, password]
+    if (!employeeNumber || !fullName || !role || !password) {
+      return res.status(400).json({
+        error: "All fields are required"
+      });
+    }
+
+    const [existing] = await db.query(
+      "SELECT * FROM employees WHERE employeeNumber = ?",
+      [employeeNumber]
     );
 
-    res.json({ message: "Employee added successfully" });
+    if (existing.length > 0) {
+      return res.status(400).json({
+        error: "Employee number already exists"
+      });
+    }
+
+    const [next] = await db.query(
+      "SELECT COALESCE(MAX(id),0)+1 AS nextId FROM employees"
+    );
+
+    await db.query(
+      `INSERT INTO employees
+      (id, employeeNumber, fullName, role, password)
+      VALUES (?, ?, ?, ?, ?)`,
+      [
+        next[0].nextId,
+        employeeNumber,
+        fullName,
+        role,
+        password
+      ]
+    );
+
+    res.json({
+      message: "Employee added successfully"
+    });
 
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.log("EMPLOYEE ERROR:", err.message);
+
+    res.status(500).json({
+      error: err.message
+    });
   }
 });
-
 /* ================= SERVER ================= */
 const PORT = process.env.PORT || 5000;
 
