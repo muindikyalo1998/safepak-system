@@ -7,7 +7,8 @@ const jwt = require("jsonwebtoken");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 
-const app = express();
+const app = express(); 
+app.set("trust proxy", 1);
 
 /* ================= SECURITY ================= */
 app.use(helmet());
