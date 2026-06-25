@@ -217,12 +217,25 @@ app.get("/api/attendance", verifyToken, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
 /* ================= LOGOUT ================= */
 app.post("/api/logout", verifyToken, async (req, res) => {
-  res.json({ message: "Logged out successfully" });
-});
+  try {
 
+    await db.query(
+      `UPDATE attendance
+       SET logoutTime = NOW()
+       WHERE employeeNumber = ?
+       AND logoutTime IS NULL`,
+      [req.user.employeeNumber]
+    );
+
+    res.json({ message: "Logged out successfully" });
+
+  } catch (err) {
+    console.log("LOGOUT ERROR:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 /* ================= ADD EMPLOYEE ================= */
 app.post("/api/employees", verifyToken, async (req, res) => {
   try {

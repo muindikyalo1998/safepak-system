@@ -62,22 +62,35 @@ function App() {
   }, [token]);
 
   /* ================= LOGOUT ================= */
-const logout = () => {
-setCurrentUser(null);
-setToken("");
-setEmployees([]);
+const logout = async () => {
+  try {
+    await axios.post(
+      `${API_BASE}/api/logout`,
+      {},
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    );
+  } catch (err) {
+    console.log(err);
+  }
 
-setLoginEmpNo("");
-setLoginPassword("");
+  setCurrentUser(null);
+  setToken("");
+  setEmployees([]);
 
-setEmpNo("");
-setFullName("");
-setRole("");
-setPassword("");
+  setLoginEmpNo("");
+  setLoginPassword("");
 
-window.location.href = "/";
+  setEmpNo("");
+  setFullName("");
+  setRole("");
+  setPassword("");
+
+  window.location.href = "/";
 };
-
   /* ================= ADD EMPLOYEE ================= */
   const addEmployee = async () => {
     if (!empNo || !fullName || !role || !password) {
