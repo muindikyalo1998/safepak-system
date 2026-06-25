@@ -168,45 +168,51 @@ const logout = async () => {
 
           <hr />
 
-          <h3>Add Employee</h3>
+          {currentUser?.role === "Admin" && (
+  <>
+    <hr />
 
-          <input
-  type="text"
-  name="new-employee-number"
-  autoComplete="off"
-  placeholder="Employee Number"
-  value={empNo}
-  onChange={(e) => setEmpNo(e.target.value)}
-/>
-          <br />
+    <h3>Add Employee</h3>
 
-          <input
-  autoComplete="off"
-  placeholder="Full Name"
-  value={fullName}
-  onChange={(e) => setFullName(e.target.value)}
-/>
-          <br />
+    <input
+      type="text"
+      name="new-employee-number"
+      autoComplete="off"
+      placeholder="Employee Number"
+      value={empNo}
+      onChange={(e) => setEmpNo(e.target.value)}
+    />
+    <br />
 
-          <input
-  autoComplete="off"
-  placeholder="Role"
-  value={role}
-  onChange={(e) => setRole(e.target.value)}
-/>
-          <br />
+    <input
+      autoComplete="off"
+      placeholder="Full Name"
+      value={fullName}
+      onChange={(e) => setFullName(e.target.value)}
+    />
+    <br />
 
-          <input
-  type="password"
-  name="new-employee-password"
-  autoComplete="new-password"
-  placeholder="Password"
-  value={password}
-  onChange={(e) => setPassword(e.target.value)}
-/>
-          <br />
+    <input
+      autoComplete="off"
+      placeholder="Role"
+      value={role}
+      onChange={(e) => setRole(e.target.value)}
+    />
+    <br />
 
-          <button onClick={addEmployee}>Add Employee</button>
+    <input
+      type="password"
+      name="new-employee-password"
+      autoComplete="new-password"
+      placeholder="Password"
+      value={password}
+      onChange={(e) => setPassword(e.target.value)}
+    />
+    <br />
+
+    <button onClick={addEmployee}>Add Employee</button>
+  </>
+)}
 
           <hr />
 
